@@ -2,47 +2,38 @@
 
 This repository contains two distinct backend implementations for a secure authentication and file access system, sharing a single provided frontend client.
 
-## Implementations
+## 1. Authentication Architecture
+*   **Custom Backend (JWT)**: I chose JSON Web Tokens (JWT) for the Node.js implementation. JWTs are stateless, meaning the server does not need to query the database to verify a user's session on every single request. This makes the REST API highly scalable and fast.
+*   **Appwrite Backend (Sessions)**: I utilized Appwrite's default session-based authentication. It automatically issues secure, HTTP-only cookies. This provides excellent built-in protection against client-side script attacks (XSS) without requiring additional manual configuration.
 
-1. **Custom Backend**: Node.js, Express, and PostgreSQL.
-2. **Managed Backend**: Appwrite Cloud via a custom client-side adapter.
+## 2. Security Implementations
+*   **Under-the-Hood Logout**:
+    *   **Custom**: Implemented via a server-side token blacklist. When a user logs out, their specific token is added to an in-memory list on the server. The authentication middleware checks this blacklist and explicitly rejects invalidated tokens, ensuring true server-side session termination rather than just relying on the client to delete the token.
+    *   **Appwrite**: Uses the `account.deleteSession('current')` SDK method, which actively targets and destroys the secure session record directly on the Appwrite cloud servers.
+*   **Enforcing User Data Isolation**:
+    *   **Custom**: Data isolation is enforced strictly at the database query level. When a user requests a file, the SQL query explicitly filters by `WHERE owner_id = req.user.id`. Even if a user attempts to manually request a file ID belonging to someone else, the controller verifies ownership before returning any data.
+    *   **Appwrite**: Enforced using Appwrite's native Document Level Security (DLS). During the automated seeding process, read and write permissions were explicitly restricted to the file owner using `Role.user(userId)`. The database engine itself blocks unauthorized access, returning a 404 error to mask the file's existence from unauthorized users.
 
-## Setup Instructions
+## 3. Appwrite Integration Details
+*   **Handled Automatically by Appwrite**: Password cryptographic hashing (Argon2), secure cookie generation, active session state management, rate limiting, and brute-force protection at the network level.
+*   **Configured Manually**: Project creation, defining the database and collection schema (columns/attributes), establishing strict Document Level Security (DLS) rules, and writing the custom JavaScript adapter (`appwrite-adapter.js`) to intercept the provided frontend client's network requests and translate them into Appwrite SDK commands.
 
-### Custom Backend (Node/Express)
+## 4. Future Improvements
+*   **Redis Cache Integration**: I would move the custom backend's token blacklist from local in-memory storage to a Redis database. This ensures the blacklist persists if the server restarts and allows the system to scale across multiple server instances.
+*   **Refresh Token Rotation**: I would implement a short-lived access token (e.g., 15 minutes) and a long-lived, securely stored refresh token system. This maximizes security while maintaining a seamless user experience.
+*   **Input Validation Pipeline**: I would integrate a schema validation library (like Zod or Joi) to strictly sanitize and validate all incoming API payloads before they reach the controller logic.
+
+## 5. Setup Instructions
+### Custom Backend (Node/Express + PostgreSQL)
 1. Navigate to the `custom-backend` directory.
-2. Run `npm install` to install dependencies.
-3. Create a `.env` file based on the provided `.env.example` and update the PostgreSQL credentials.
-4. Create a PostgreSQL database named `secure_auth`.
-5. Run `node seed.js` to populate the database with test users.
-6. Run `npm start` (or `npx nodemon server.js`) to start the server on port 3000.
-7. Open `public/index.html` and select the "Custom REST backend" mode.
+2. Run `npm install` to install all dependencies.
+3. Create a `.env` file using the provided `.env.example` as a template and enter your local PostgreSQL credentials.
+4. Create a new PostgreSQL database named `secure_auth`.
+5. Run `node seed.js` to automatically populate the database with the 3 required test users and their files.
+6. Run `npm start` to boot the server on port 3000.
+7. Open `public/index.html` in your browser and select the "Custom REST backend" mode.
 
 ### Managed Backend (Appwrite)
-1. The Appwrite backend is accessible via the "Appwrite" mode in `public/index.html`.
-2. The project uses a custom adapter (`appwrite-adapter.js`) to translate REST calls to Appwrite Web SDK commands.
-3. The database is pre-seeded. To re-seed, navigate to `appwrite-backend`, create a `.env` file with your Appwrite API credentials, run `npm install`, and execute `node seed.js`.
-
-## Architectural Decisions & Security
-
-### Authentication: JWT vs. Session-Based
-* **Custom Backend (JWT)**: I selected JSON Web Tokens for the custom implementation. JWTs provide a stateless authentication mechanism, reducing database lookups for session validation on every protected route. This approach is highly scalable for REST APIs.
-* **Appwrite Backend (Sessions)**: Appwrite handles authentication using secure, HTTP-only session cookies by default. This provides robust protection against Cross-Site Scripting (XSS) attacks out of the box.
-
-### Logout Implementation
-* **Custom Backend**: Implemented via a server-side token blacklist. When a user logs out, the specific JWT is added to an in-memory `Set`. The authentication middleware rejects any blacklisted tokens, strictly enforcing server-side invalidation.
-* **Appwrite Backend**: Implemented using the `account.deleteSession('current')` SDK method, which actively destroys the session on the Appwrite cloud servers.
-
-### User Data Isolation Enforcement
-* **Custom Backend**: Data isolation is manually enforced at the controller level. For file access, the database queries strictly filter by `owner_id = req.user.id`. If a user requests a specific file ID, the controller explicitly verifies that the file's `owner_id` matches the authenticated user's ID before returning the data.
-* **Appwrite Backend**: Enforced utilizing Appwrite's Document Level Security (DLS). During the seeding process, read and write permissions are explicitly granted only to the specific user's ID (`Role.user(userId)`). The Appwrite database engine automatically rejects unauthorized read attempts.
-
-### Appwrite: Automatic vs. Manual Configuration
-* **Handled Automatically**: Password hashing (Argon2), secure cookie generation, session management, rate limiting, and brute-force protection.
-* **Configured Manually**: Database schema creation, collection attributes definition, Document Level Security enforcement rules, and the custom JavaScript adapter pattern to interface with the provided static HTML client.
-
-### Future Improvements
-Given more time, I would implement the following enhancements:
-* **Redis Integration**: Transition the JWT token blacklist from in-memory storage to a Redis cache to ensure the blacklist persists across server restarts and scales across multiple server instances.
-* **Refresh Tokens**: Implement a short-lived access token and long-lived refresh token architecture to enhance security while maintaining user experience.
-* **Input Validation**: Add a robust validation library (like Zod or Joi) to strictly sanitize and validate all incoming request payloads.
+1. Open `public/index.html` and select the "Appwrite" mode. 
+2. The testing client will connect to the cloud database automatically via the custom adapter.
+3. *(Optional)* To re-seed the cloud database, navigate to `appwrite-backend`, create a `.env` file with your Appwrite API credentials, run `npm install`, and execute `node seed.js`.
